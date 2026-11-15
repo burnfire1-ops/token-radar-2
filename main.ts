@@ -15,14 +15,20 @@
 // make.fun library.
 //
 // The board is 192 rows: all 40 watchlist protocols plus the 152 pre-token
-// protocols that pass the board's exclusion test, each with a 7-step farm
+// protocols that pass the board's exclusion test, each with an 8-step farm
 // plan priced by the slice model (slice = capital / (TVL + capital) x
 // airdrop share x implied value, net of the cheapest chain's gas and bridge
 // plus the 4% T-bill yield given up over the hold) and a P10-P90 band from
-// the blind residuals. New in v10, every row also carries farm plans at
-// three capitals ($100 / $1,000 / $10,000), a per-row model decomposition
-// (every factor that went into its implied value), and its uncertainty band.
-// The live-token protocols are set aside with their market caps, never mixed
+// the blind residuals. NEW in v11, the net is multiplied by the protocol's
+// empirical launch probability P(launch) — the share of protocols in its
+// age x TVL band that have a traded token — and each plan carries a 4-way
+// verdict (ROBUST when the low end of the band pays, FARM when the point
+// pays, THIN when only the high end pays, SKIP otherwise), a break-even
+// capital and share, and a walk-away step that states the plan's case
+// against itself. Every row also carries farm plans at three capitals
+// ($100 / $1,000 / $10,000), a per-row model decomposition (every factor
+// that went into its implied value), and its uncertainty band. The
+// live-token protocols are set aside with their market caps, never mixed
 // into the ranking; the dashboard shows them apart, and shows every
 // set-aside protocol with the reason it was set aside. No kin discount is
 // applied anywhere.
@@ -89,7 +95,7 @@ function copyFiles(from: string, to: string): string[] {
 copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
 const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 4) {
-  process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 4, the board, a detail view, a filtered view, and the method/backtest tab\n`);
+  process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 4, the board, a detail view, the ROBUST filter, and the research note tab\n`);
   process.exit(1);
 }
 for (const name of shots) {
@@ -106,5 +112,6 @@ process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside, ${radar.set_aside_size} set aside)\n` +
     `token radar: universe ${radar.universe.ranked} ranked + ${radar.universe.traded} traded + ${radar.universe.set_aside} set aside = ${radar.universe.total}\n` +
     `token radar: model ${radar.model.version}, ${radar.model.comps_count} comps, LOO x${radar.model.loo_miss.toFixed(4)}, OOS x${radar.model.oos_miss.toFixed(4)}, OOS24 x${radar.model.oos2024_miss.toFixed(4)}\n` +
+    `token radar: P(launch) overall ${(radar.plaunch.overall_p * 100).toFixed(1)}% (${radar.plaunch.overall_has}/${radar.plaunch.overall_n}); verdicts ROBUST ${radar.verdict_counts.robust} / FARM ${radar.verdict_counts.farm} / THIN ${radar.verdict_counts.thin} / SKIP ${radar.verdict_counts.skip}\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );
