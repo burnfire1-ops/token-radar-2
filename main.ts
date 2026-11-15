@@ -1,21 +1,31 @@
 // A working token-radar-01 entry (Node 22, standard library only).
 //
-// The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores
-// every pre-token protocol with the radar-10 model in lib/model.ts — rank 1's verified recipe: a
-// linear size curve fitted to the snapshot's own traded tokens (trimmed to 101 comps), adjusted by
-// family (mean log residual per category, shrunk n/(n+20), capped [0.5, 2.5]), growth (TVL carried
-// two weeks ahead), seasoning (piecewise age factor), and a sibling factor (x0.50 for watchlist
-// siblings; non-watchlist siblings are set aside) — writes the ranked board to /output/board.json,
-// and copies this repository's dashboard/ and screenshots/ to /output. Last, it writes
-// /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
+// The program reads the sealed snapshot from /input/snapshot.json (or --input
+// <file|dir>), scores every pre-token protocol with the radar-11 model in
+// lib/model.ts — rank 1's verified recipe plus the one validated v10
+// improvement, a chain-breadth factor: a linear size curve fitted to the
+// snapshot's own traded tokens (trimmed to 101 comps), adjusted by family
+// (mean log residual per category, shrunk n/(n+20), capped [0.5, 2.5]),
+// growth (TVL carried two weeks ahead), seasoning (piecewise age factor),
+// a sibling factor (x0.50 for watchlist siblings; non-watchlist siblings
+// are set aside), and breadth (a binary multi-chain indicator, ridge-shrunk)
+// — writes the ranked board to /output/board.json, and copies this
+// repository's dashboard/ and screenshots/ to /output. Last, it writes
+// /output/dossier.json, the summary the judge reads, with the vendored
+// make.fun library.
 //
-// The board is 192 rows: all 40 watchlist protocols plus the 152 pre-token protocols that pass
-// the board's exclusion test, each with a 7-step farm plan priced by the slice model (slice =
-// capital / (TVL + capital) x airdrop share x implied value, net of the cheapest chain's gas and
-// bridge plus the 4% T-bill yield given up over the hold) and a P10-P90 band from the blind
-// residuals. The live-token protocols are set aside with their market caps, never mixed into the
-// ranking; the dashboard shows them apart, and shows every set-aside protocol with the reason it
-// was set aside. No kin discount is applied anywhere.
+// The board is 192 rows: all 40 watchlist protocols plus the 152 pre-token
+// protocols that pass the board's exclusion test, each with a 7-step farm
+// plan priced by the slice model (slice = capital / (TVL + capital) x
+// airdrop share x implied value, net of the cheapest chain's gas and bridge
+// plus the 4% T-bill yield given up over the hold) and a P10-P90 band from
+// the blind residuals. New in v10, every row also carries farm plans at
+// three capitals ($100 / $1,000 / $10,000), a per-row model decomposition
+// (every factor that went into its implied value), and its uncertainty band.
+// The live-token protocols are set aside with their market caps, never mixed
+// into the ranking; the dashboard shows them apart, and shows every
+// set-aside protocol with the reason it was set aside. No kin discount is
+// applied anywhere.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
@@ -95,6 +105,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside, ${radar.set_aside_size} set aside)\n` +
     `token radar: universe ${radar.universe.ranked} ranked + ${radar.universe.traded} traded + ${radar.universe.set_aside} set aside = ${radar.universe.total}\n` +
-    `token radar: model ${radar.model.version}, ${radar.model.comps_count} comps, LOO x${radar.model.loo_miss.toFixed(4)}, OOS x${radar.model.oos_miss.toFixed(4)}\n` +
+    `token radar: model ${radar.model.version}, ${radar.model.comps_count} comps, LOO x${radar.model.loo_miss.toFixed(4)}, OOS x${radar.model.oos_miss.toFixed(4)}, OOS24 x${radar.model.oos2024_miss.toFixed(4)}\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

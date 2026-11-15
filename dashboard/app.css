@@ -1,4 +1,4 @@
-/* Launch Radar — warm dark theme. Canvas #171208, panel #221a10, border #3a2f22,
+/* Token Radar — warm dark theme. Canvas #171208, panel #221a10, border #3a2f22,
    ink #f2e9d8, muted #b8a88e, accent #f5a623 (amber), negative #ff7a6b. */
 
 :root {
@@ -15,6 +15,7 @@
   --negative: #ff7a6b;
   --warn: #f0c040;
   --blue: #7fb3d5;
+  --green: #8fce7a;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 }
 
@@ -89,12 +90,12 @@ a.skip:focus { left: 0; }
 .tabs button:hover { color: var(--ink); border-color: var(--border2); }
 .tabs button.on { background: var(--accent); color: #171208; border-color: var(--accent); font-weight: 600; }
 
-/* ---- filters ---- */
+/* ---- filters and lab controls ---- */
 
 .filters {
   display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; align-items: center;
 }
-.filters input[type="search"], .filters select {
+.filters input[type="search"], .filters select, .filters input[type="number"] {
   background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--border);
@@ -104,8 +105,9 @@ a.skip:focus { left: 0; }
   font-family: inherit;
 }
 .filters input[type="search"] { flex: 1; min-width: 200px; }
-.filters select { cursor: pointer; }
+.filters select, .filters input[type="number"] { cursor: pointer; }
 .filters label { color: var(--muted); font-size: 13px; }
+.filters input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
 
 .count { margin-top: 14px; color: var(--muted); font-size: 13px; }
 
@@ -159,6 +161,15 @@ td b { font-weight: 600; }
 .pill.THIN { color: #171208; background: var(--warn); }
 .pill.SKIP { color: var(--ink); background: #5a2a22; }
 
+.tag {
+  display: inline-block;
+  font-size: 11px; font-weight: 600;
+  padding: 1px 7px; border-radius: 12px;
+  color: var(--blue); border: 1px solid var(--blue);
+  margin-left: 6px;
+}
+.tag.single { color: var(--faint); border-color: var(--border2); }
+
 /* ---- detail ---- */
 
 .detail h2 { margin: 18px 0 4px; font-size: 24px; }
@@ -177,12 +188,47 @@ table.kv th { width: 220px; font-weight: 600; text-transform: none; letter-spaci
 table.kv td { font-size: 14px; }
 table.kv td.num { text-align: right; }
 
-/* ---- method ---- */
+.tierbtns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.tierbtns button {
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tierbtns button:hover { color: var(--ink); border-color: var(--border2); }
+.tierbtns button.on { background: var(--accent); color: #171208; border-color: var(--accent); font-weight: 600; }
+
+.callout {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--blue);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+.callout b { color: var(--ink); }
+
+/* ---- method / lab ---- */
 
 .method { margin-top: 8px; }
 .method h2 { margin: 26px 0 6px; font-size: 18px; }
 .method p { margin: 8px 0; font-size: 14px; max-width: 860px; }
 .method p.note { color: var(--muted); font-size: 13px; }
+
+.labbox {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-top: 16px;
+}
+.labbox h2 { margin: 0 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.labbox p { margin: 6px 0; font-size: 14px; max-width: 860px; }
 
 footer {
   margin-top: 30px; color: var(--faint); font-size: 12px; line-height: 1.6;

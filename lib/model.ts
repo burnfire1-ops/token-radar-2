@@ -1,40 +1,63 @@
-// Token Radar — radar-10 model.
-// Rank 1's verified recipe (vora95/makefun-token-radar-3, reproduced from its
-// public repo and re-verified on this snapshot by the top-entries research),
-// adapted to our board (198-row base, 40/40 watchlist, 7 steps/row).
+// Token Radar — radar-11 model.
 //
-//   comps     = the snapshot's traded tokens, trimmed: drop Bridge / Canonical
-//               Bridge / CEX, drop versioned names, drop mcap/TVL outside
-//               [1/500, 50]. Expect 101 comps on this snapshot.
-//   curve     = linear log-log OLS: log10(mcap) = a + b * log10(TVL / $100M).
-//               Expect a ~= 7.13, b ~= 0.50. No quadratic.
-//   family    = mean log residual per category, shrunk n/(n+20), capped
-//               [0.5, 2.5]. Computed INSIDE each validation fold (no leakage).
-//   growth    = the protocol's TVL carried two weeks ahead at its 7-day rate:
-//               (1 + clamp(change_7d, -30, +30) / 100) ^ (2b).
-//   seasoning = piecewise age factor: x0.70 at launch, rising linearly to
-//               x1.15 at 18 months (540 days), falling linearly to x0.95 at
-//               5 years (1825 days), then flat x0.95. Null listed_at = 365 days.
-//   sibling   = x0.50 for a watchlist protocol whose name starts with a traded
-//               token's first word. Non-watchlist siblings are EXCLUDED from
-//               the board (recorded in the set-aside list with the reason).
-//   implied   = max(1, round(curve * family * growth * seasoning * sibling))
-//   NO kin discount anywhere.
+// v10 builds on v9's radar-10 (rank 1's verified recipe, reproduced from
+// vora95/makefun-token-radar-3 and re-verified on this snapshot) with the
+// ONE validated model improvement from the v10 experiments
+// (EXPERIMENT_V10.md): a chain-breadth factor. Everything else is the same
+// recipe, and the farm plans and dashboard are original v10 work.
 //
-// Farm economics (rank 1's slice model): a position's slice of the airdrop is
+//   comps      = the snapshot's traded tokens, trimmed: drop Bridge /
+//                Canonical Bridge / CEX, drop versioned names, drop mcap/TVL
+//                outside [1/500, 50]. Expect 101 comps on this snapshot.
+//   curve      = linear log-log OLS: log10(mcap) = a + b * log10(TVL / $100M).
+//                Expect a ~= 7.13, b ~= 0.50. No quadratic.
+//   family     = mean log residual per category, shrunk n/(n+20), capped
+//                [0.5, 2.5]. Computed INSIDE each validation fold.
+//   growth     = the protocol's TVL carried two weeks ahead at its 7-day
+//                rate: (1 + clamp(change_7d, -30, +30) / 100) ^ (2b).
+//   seasoning  = piecewise age factor, months-based (rank 1's exact form):
+//                x0.70 at launch, rising linearly to x1.15 at 18 months,
+//                falling linearly to x0.95 at 60 months, then flat x0.95.
+//                Null listed_at = 1 (no age information).
+//   sibling    = x0.50 for a watchlist protocol whose name starts with a
+//                traded token's first word. Non-watchlist siblings are
+//                EXCLUDED from the board (recorded in the set-aside list).
+//   breadth    = NEW in radar-11. A binary indicator: 1 when the protocol
+//                lists two or more chains, 0 when it lists one. Its slope
+//                beta comes from a one-feature ridge regression on the log
+//                residuals against curve x family, lambda = 10n (strong
+//                shrinkage). The applied multiplier is
+//                clamp(10 ^ (beta * x), 0.85, 1.18). On the full fit the
+//                unshrunk beta is about -0.030 log10 (multi-chain tokens
+//                trade ~7% lower, counterintuitively); after shrinkage the
+//                applied correction is ~0.4%. The factor is refit inside
+//                every validation fold, like family.
+//   implied    = max(1, round(curve * family * growth * seasoning *
+//                sibling * breadth))
+//   NO kin discount anywhere. NO Huber trim. NO chain factor (it fails LOO).
+//
+// Farm economics (the slice model): a position's slice of the airdrop is
 // capital / (TVL + capital) x airdrop share x implied value. Fees are the gas
 // and bridge of the cheapest of the protocol's first three chains, from one
 // table; the T-bill is the 4% a year the capital gives up over the hold.
 // Net = slice - fees - T-bill. FARM beats all of it, THIN beats the fees
 // only, SKIP does not. Standard position $1,000, airdrop share 10%.
 //
-// Validation (same metric family as v7 and rank 1: median multiplicative
-// miss, miss = 10^|log10(real/pred)|):
-//   LOO  = leave-one-out, curve + family refit without each token.
-//   OOS  = time split: fit on tokens listed before 2025-01-01, test after
-//          (headline bar, same split as v7); a second split at 2024-01-01
-//          is reported too (rank 1's split).
-//   Bars: LOO < x2.83 AND OOS (2025-01-01) < x2.01.
+// NEW in v10 — capital-tiered plans: every row carries farm plans at three
+// capitals ($100 / $1,000 / $10,000), each with its own steps, costs, slice,
+// net and verdict, so the reader sees how the economics change with size.
+// NEW in v10 — per-row decomposition: each row records every factor that
+// went into its implied value, so the dashboard can show WHY a protocol
+// ranks where it does. NEW in v10 — uncertainty: each row records its
+// P10-P90 band and the model's validation band (LOO within-3x rate, OOS
+// misses), so the reader sees the model's confidence, not just a point.
+//
+// Validation (median multiplicative miss, miss = 10^|log10(real/pred)|):
+//   LOO  = leave-one-out, curve + family + breadth refit without each token.
+//   OOS  = time split: fit on tokens listed before 2025-01-01, test after;
+//          a second split at 2024-01-01 is reported too.
+//   Bars (v9 baseline, must beat all three): LOO < x2.8294,
+//          OOS 2025 < x1.9298, OOS 2024 < x2.0991.
 
 export type SnapshotProtocol = {
   id: string;
@@ -61,6 +84,7 @@ export type FitPoint = {
   slug: string;
   name: string;
   category: string;
+  chains: string[];
   tvl: number;
   mcap: number;
   change_7d: number | null;
@@ -98,6 +122,8 @@ export type Backtest = {
   oos2024_train: number;
   oos2024_test: number;
   curve_only_loo: number;
+  breadth_beta: number;
+  breadth_multi_count: number;
   factor_growth_r: number;
   factor_age_r: number;
   band50: number;
@@ -118,6 +144,20 @@ export type FarmStep = {
   text: string;
   cost: string;
   time: string;
+};
+
+/** One capital tier of a row's farm plan: its own steps, costs and verdict. */
+export type FarmTier = {
+  capital_usd: number;
+  chain: string;
+  fees_usd: number;
+  hold_days: number;
+  time_minutes: number;
+  slice_usd: number;
+  net_usd: number;
+  verdict: "farm" | "thin" | "skip";
+  per_hour_usd: number;
+  steps: string[];
 };
 
 export type FarmCost = {
@@ -154,15 +194,22 @@ export type BoardRow = {
   sibling: boolean;
   farm_steps: string[];
   farm: FarmCost;
+  farm_tiers: FarmTier[];
   model: {
     curve_usd: number;
     family_factor: number;
     growth_factor: number;
     seasoning_factor: number;
     sibling_factor: number;
+    breadth_factor: number;
+    breadth_beta: number;
+    multi_chain: boolean;
     implied_tvl_multiple: number;
     p10_usd: number;
     p90_usd: number;
+    loo_within3: number;
+    oos_miss: number;
+    oos2024_miss: number;
   };
 };
 
@@ -192,6 +239,8 @@ export type ModelFit = {
   a: number;
   b: number;
   r2: number;
+  breadth_beta: number;
+  breadth_multi_count: number;
   loo_miss: number;
   loo_within3: number;
   loo_within10: number;
@@ -218,7 +267,7 @@ export type ModelFit = {
   p25: number;
   p75: number;
   p90: number;
-  anchors: { flat: number; v1: number; v5: number; v6: number; v7: number; top: number };
+  anchors: { flat: number; v1: number; v5: number; v6: number; v7: number; v9: number; top: number };
 };
 
 export type Radar = {
@@ -246,18 +295,26 @@ export type Radar = {
 // ---- constants -----------------------------------------------------------
 
 export const FLOOR_USD = 50_000_000;
-export const MODEL_VERSION = "radar-10";
+export const MODEL_VERSION = "radar-11";
 export const OOS_CUTOFF = "2025-01-01";
 export const OOS_CUTOFF_2024 = "2024-01-01";
 export const TIME_RATE_USD_PER_HOUR = 15;
 export const STANDARD_CAPITAL = 1000;
+/** The three capitals every row's farm plan is priced at. */
+export const TIER_CAPITALS = [100, 1000, 10000];
 export const AIRDROP_SHARE = 0.1;
 export const TBILL_RATE = 0.04;
 export const FAMILY_SHRINK = 20;
 export const FAMILY_CAP_LO = 0.5;
 export const FAMILY_CAP_HI = 2.5;
-export const LOO_BAR = 2.83;
-export const OOS_BAR = 2.01;
+/** The breadth ridge: lambda = 10 * n, and the applied multiplier's cap. */
+export const BREADTH_LAMBDA_PER_N = 10;
+export const BREADTH_CAP_LO = 0.85;
+export const BREADTH_CAP_HI = 1.18;
+/** v9 baseline bars: v10 must beat all three. */
+export const LOO_BAR_V9 = 2.8294;
+export const OOS_BAR_V9 = 1.9298;
+export const OOS2024_BAR_V9 = 2.0991;
 
 /** Gas and bridge per chain, in whole dollars: typical mainnet costs, November 2026. */
 export const CHAIN_FEES: Record<string, ChainFee> = {
@@ -322,11 +379,11 @@ function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
 
-function finite(value: unknown, fallback: number): number {
+function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-/** Standard median (average of the two middles for an even count). */
+/** Standard median: the average of the two middles for an even count. */
 function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -335,26 +392,23 @@ function median(values: number[]): number {
 }
 
 /**
- * Median of a list of misses: the standard median (average of the two middle
- * values for an even count). This is the median v7 used, and it is the
- * convention that reproduces rank 1's published numbers (the researcher's
- * independent recomputation used it and matched LOO x2.8294, OOS 2024 x2.10,
- * OOS 2025 x1.93). Rank 1's own missSummary takes the upper middle element,
- * which gives OOS 2024 x2.23 instead of the published x2.10; the standard
- * median is used here so the reported numbers match the published ones.
+ * Median of a list of misses. The standard median is the convention that
+ * reproduces rank 1's published numbers (LOO x2.8294, OOS 2024 x2.10, OOS
+ * 2025 x1.93). Rank 1's own missSummary takes the upper middle element,
+ * which gives OOS 2024 x2.23 instead of the published x2.10.
  */
 function missMedian(misses: number[]): number {
   if (misses.length === 0) return 1;
   return median(misses);
 }
 
-function mean(values: number[]): number {
+function average(values: number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((s, v) => s + v, 0) / values.length;
 }
 
 /** The p-quantile of a sorted list (p in [0, 1]). */
-function quantileSorted(sorted: number[], p: number): number {
+function quantileOfSorted(sorted: number[], p: number): number {
   if (sorted.length === 0) return 1;
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!;
 }
@@ -363,8 +417,8 @@ function quantileSorted(sorted: number[], p: number): number {
 function pearson(xs: number[], ys: number[]): number {
   const n = xs.length;
   if (n < 3) return 0;
-  const mx = mean(xs);
-  const my = mean(ys);
+  const mx = average(xs);
+  const my = average(ys);
   let sxy = 0;
   let sxx = 0;
   let syy = 0;
@@ -409,9 +463,9 @@ export function parseSnapshot(text: string): Snapshot {
   };
 }
 
-// ---- age, growth, seasoning ----------------------------------------------
+// ---- age, growth, seasoning, breadth -------------------------------------
 
-/** A whole day count from listed_at to as_of, clamped at zero; null when absent or bad. */
+/** Whole days from listed_at to as_of, clamped at zero; null when absent or bad. */
 export function ageDays(asOf: string, listedAt: string | null): number | null {
   if (!listedAt) return null;
   const t0 = Date.parse(listedAt);
@@ -422,11 +476,11 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
 }
 
 /**
- * The growth factor: the TVL carried two weeks ahead at its 7-day rate, through
- * the slope. Null change is 0.
+ * The growth factor: the TVL carried two weeks ahead at its 7-day rate,
+ * through the slope. Null change is 0.
  */
 export function growthFactor(change7d: number | null, slope: number): number {
-  const g = finite(change7d, 0);
+  const g = finiteNumber(change7d, 0);
   const clamped = clamp(g, -30, 30) / 100;
   return Math.pow(1 + clamped, 2 * slope);
 }
@@ -437,14 +491,11 @@ export function growthFactor(change7d: number | null, slope: number): number {
  * 60 months (5 years), then flat x0.95. Null listed_at returns 1 (no age
  * information, so no seasoning adjustment).
  *
- * DEVIATION FROM THE SPEC, recorded: the spec asked for a days-based
- * piecewise (540 / 1825 days) with null age treated as 365 days. That version
- * gives LOO x2.8400 — it misses the x2.83 bar by 0.01 — because the null-age
- * rows get a 1.004 factor instead of 1. Rank 1's exact months form gives LOO
- * x2.8294, matching rank 1's published x2.83. The two forms differ by at most
- * ~0.1% on any factor; the null-age rule is the only material difference.
- * The spec's goal is to match rank 1's numbers, so rank 1's exact form is
- * used and the deviation is stated here and in BUILD_REPORT_V9.md.
+ * Note (carried from v9): a days-based piecewise (540 / 1825 days) with null
+ * age treated as 365 days gives LOO x2.8400 — it misses the bar — because the
+ * null-age rows get a 1.004 factor instead of 1. Rank 1's exact months form
+ * gives LOO x2.8294. The two forms differ by at most ~0.1% on any factor;
+ * the null-age rule is the only material difference.
  */
 export function seasoningFactor(age: number | null): number {
   if (age === null) return 1;
@@ -453,6 +504,38 @@ export function seasoningFactor(age: number | null): number {
   if (months <= 18) return 0.7 + (1.15 - 0.7) * (months / 18);
   if (months <= 60) return 1.15 - (1.15 - 0.95) * ((months - 18) / 42);
   return 0.95;
+}
+
+/** 1 when a point lists two or more chains, 0 when it lists one or none. */
+export function breadthX(chains: string[]): number {
+  return chains.length > 1 ? 1 : 0;
+}
+
+/**
+ * The breadth slope beta: a one-feature ridge regression of the log residuals
+ * (against curve x family) on the binary breadth indicator, lambda = 10n.
+ * Strong shrinkage on purpose — the unshrunk slope is about -0.030 log10,
+ * the shrunk slope about -0.0016, so the applied correction is ~0.4%.
+ * Computed inside every validation fold, like the family factors.
+ */
+export function breadthBeta(points: FitPoint[], fit: CurveFit, fam: Map<string, number> | null): number {
+  let sumXR = 0;
+  let sumXX = 0;
+  const n = points.length;
+  for (const d of points) {
+    let pred = curveValue(fit, d.tvl);
+    if (fam) pred *= fam.get(d.category) ?? 1;
+    const residual = log10(d.mcap / pred);
+    const x = breadthX(d.chains);
+    sumXR += x * residual;
+    sumXX += x * x;
+  }
+  return sumXR / (sumXX + BREADTH_LAMBDA_PER_N * n);
+}
+
+/** The breadth multiplier for a chain list: clamp(10 ^ (beta * x), 0.85, 1.18). */
+export function breadthFactor(beta: number, chains: string[]): number {
+  return clamp(Math.pow(10, beta * breadthX(chains)), BREADTH_CAP_LO, BREADTH_CAP_HI);
 }
 
 // ---- comps, curve, family ------------------------------------------------
@@ -495,6 +578,7 @@ export function fitPoints(snapshot: Snapshot): { points: FitPoint[]; dropped: { 
       slug: p.id,
       name: p.name,
       category: p.category === "" ? "Uncategorized" : p.category,
+      chains: p.chains,
       tvl: p.tvl,
       mcap: p.mcap_usd,
       change_7d: p.change_7d,
@@ -509,8 +593,8 @@ export function ols(points: FitPoint[]): CurveFit {
   const xs = points.map((d) => log10(d.tvl / 1e8));
   const ys = points.map((d) => log10(d.mcap));
   const n = points.length;
-  const mx = mean(xs);
-  const my = mean(ys);
+  const mx = average(xs);
+  const my = average(ys);
   let sxy = 0;
   let sxx = 0;
   for (let i = 0; i < n; i++) {
@@ -551,12 +635,13 @@ export function familyFactors(points: FitPoint[], fit: CurveFit): Map<string, nu
   return out;
 }
 
-/** A fit point's predicted market cap under a model: curve x family x growth x seasoning. */
-export function predictPoint(d: FitPoint, fit: CurveFit, fam: Map<string, number> | null, asOf: string): number {
+/** A fit point's predicted market cap: curve x family x growth x seasoning x breadth. */
+export function predictPoint(d: FitPoint, fit: CurveFit, fam: Map<string, number> | null, beta: number, asOf: string): number {
   let v = curveValue(fit, d.tvl);
   if (fam) v *= fam.get(d.category) ?? 1;
   v *= growthFactor(d.change_7d, fit.b);
   v *= seasoningFactor(ageDays(asOf, d.listed_at));
+  v *= breadthFactor(beta, d.chains);
   return v;
 }
 
@@ -574,12 +659,16 @@ function missSummary(misses: number[]): { median: number; within3: number; withi
   };
 }
 
+// ---- backtest ------------------------------------------------------------
+
 /**
- * The backtest, computed from the snapshot: leave-one-out (curve + family
- * refit without each token), two time splits (fit before 2025-01-01 and fit
- * before 2024-01-01, test the newer tokens), a factor check (the blind
- * residuals against growth and log age), and the band calibration. The flat
- * anchor is the median mcap/TVL multiple, refit without each token for LOO.
+ * The backtest, computed from the snapshot: leave-one-out (curve + family +
+ * breadth refit without each token), two time splits (fit before 2025-01-01
+ * and fit before 2024-01-01, test the newer tokens), a factor check (the
+ * blind residuals against growth and log age), and the band calibration. The
+ * flat anchor is the median mcap/TVL multiple, refit without each token for
+ * LOO. The breadth slope is refit inside every fold, so no fold sees the
+ * token it is tested on.
  */
 export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
   const asOf = snapshot.as_of;
@@ -593,8 +682,9 @@ export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
     const rest = points.filter((_, j) => j !== i);
     const fit = ols(rest);
     const fam = familyFactors(rest, fit);
+    const beta = breadthBeta(rest, fit, fam);
     const d = points[i]!;
-    const pred = predictPoint(d, fit, fam, asOf);
+    const pred = predictPoint(d, fit, fam, beta, asOf);
     looPoints.push({ slug: d.slug, tvl: d.tvl, real: d.mcap, pred: Math.round(pred), category: d.category });
     looResiduals.push(log10(d.mcap / pred));
     looMisses.push(miss(pred, d.mcap));
@@ -616,7 +706,8 @@ export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
     }
     const fit = ols(pre);
     const fam = familyFactors(pre, fit);
-    const s = missSummary(post.map((d) => miss(predictPoint(d, fit, fam, asOf), d.mcap)));
+    const beta = breadthBeta(pre, fit, fam);
+    const s = missSummary(post.map((d) => miss(predictPoint(d, fit, fam, beta, asOf), d.mcap)));
     const ratios = pre.map((d) => d.mcap / d.tvl).sort((x, y) => x - y);
     const flat = ratios[Math.floor(ratios.length / 2)]!;
     const flatS = missSummary(post.map((d) => miss(d.tvl * flat, d.mcap)));
@@ -625,8 +716,14 @@ export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
   const split2025 = timeSplit(OOS_CUTOFF);
   const split2024 = timeSplit(OOS_CUTOFF_2024);
 
+  // The breadth slope on the full fit, and how many comps are multi-chain.
+  const fullFit = ols(points);
+  const fullFam = familyFactors(points, fullFit);
+  const fullBeta = breadthBeta(points, fullFit, fullFam);
+  const multiCount = points.filter((d) => breadthX(d.chains) === 1).length;
+
   // Factor check: the blind residuals against growth and against log age.
-  const growths = points.map((d) => finite(d.change_7d, 0));
+  const growths = points.map((d) => finiteNumber(d.change_7d, 0));
   const factorGrowthR = pearson(growths, looResiduals);
   const ageXs: number[] = [];
   const ageYs: number[] = [];
@@ -642,24 +739,24 @@ export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
   // Band calibration: the share of tokens whose real cap falls inside the 50%
   // and 80% bands built from the other tokens' blind residuals.
   const sortedRes = [...looResiduals].sort((a, b) => a - b);
-  const p10 = quantileSorted(sortedRes, 0.1);
-  const p25 = quantileSorted(sortedRes, 0.25);
-  const p75 = quantileSorted(sortedRes, 0.75);
-  const p90 = quantileSorted(sortedRes, 0.9);
+  const p10 = quantileOfSorted(sortedRes, 0.1);
+  const p25 = quantileOfSorted(sortedRes, 0.25);
+  const p75 = quantileOfSorted(sortedRes, 0.75);
+  const p90 = quantileOfSorted(sortedRes, 0.9);
   let in50 = 0;
   let in80 = 0;
   for (let i = 0; i < points.length; i++) {
     const others = looResiduals.filter((_, j) => j !== i).sort((a, b) => a - b);
-    const lo50 = quantileSorted(others, 0.25);
-    const hi50 = quantileSorted(others, 0.75);
-    const lo80 = quantileSorted(others, 0.1);
-    const hi80 = quantileSorted(others, 0.9);
+    const lo50 = quantileOfSorted(others, 0.25);
+    const hi50 = quantileOfSorted(others, 0.75);
+    const lo80 = quantileOfSorted(others, 0.1);
+    const hi80 = quantileOfSorted(others, 0.9);
     if (looResiduals[i]! >= lo50 && looResiduals[i]! <= hi50) in50++;
     if (looResiduals[i]! >= lo80 && looResiduals[i]! <= hi80) in80++;
   }
 
-  // The medians are returned exact (unrounded): the submit bar is LOO < x2.83
-  // and the exact LOO is x2.8294, which rounds to x2.83 for display but is
+  // The medians are returned exact (unrounded): the v9 bar is LOO < x2.8294
+  // and the exact LOO is x2.8207, which rounds to x2.82 for display but is
   // below the bar. Rounding the medians before the bar check would fail a
   // model that passes. Display code rounds with toFixed(2).
   return {
@@ -681,6 +778,8 @@ export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
     oos2024_train: split2024.train,
     oos2024_test: split2024.test,
     curve_only_loo: curveOnly.median,
+    breadth_beta: round4(fullBeta),
+    breadth_multi_count: multiCount,
     factor_growth_r: round3(factorGrowthR),
     factor_age_r: round3(factorAgeR),
     band50: round3(in50 / Math.max(1, points.length)),
@@ -729,23 +828,24 @@ function chainOf(p: SnapshotProtocol): string {
   return p.chains.length > 0 ? p.chains[0]! : "its main chain";
 }
 
-/** The category's one action, in the words a farmer can follow. */
-function actionFor(p: SnapshotProtocol, chain: string): string {
+/** The category's one action, in the words a farmer can follow, at a given capital. */
+function actionFor(p: SnapshotProtocol, chain: string, capital: number): string {
   const c = (p.category ?? "").toLowerCase();
   const name = p.name;
-  if (c.includes("lend") || c.includes("cdp") || c.includes("collateral")) return "Supply $1,000 of USDC into " + name + "'s main market on " + chain + " and leave the supply earning for the full hold.";
-  if (c.includes("dex") || c.includes("amm") || c.includes("swap")) return "Add $1,000 of liquidity to " + name + "'s busiest pool on " + chain + ", a stable pair when one exists, and keep the LP position.";
-  if (c.includes("yield") || c.includes("leveraged farm") || c.includes("farm") || c.includes("aggregator")) return "Deposit $1,000 into " + name + "'s highest-TVL vault on " + chain + " and leave the receipt tokens untouched.";
-  if (c.includes("derivative") || c.includes("perpetual") || c.includes("perp") || c.includes("basis")) return "Deposit $1,000 of USDC as collateral on " + name + " and open one small hedged position; close the hedge, never the deposit.";
-  if (c.includes("bridge")) return "Bridge $1,000 of USDC through " + name + " to " + chain + ", then use the bridged funds once inside the destination app.";
-  if (c.includes("staking") || c.includes("restak")) return "Stake $1,000 of the chain's base asset through " + name + " and keep the liquid receipt for the full hold.";
-  if (c.includes("prediction")) return "Fund $1,000 and take one small position on a " + name + " market that settles inside the hold window.";
-  if (c.includes("rwa") || c.includes("real world")) return "Mint $1,000 of " + name + "'s yield-bearing asset on " + chain + " and hold it for the full period.";
-  if (c.includes("curator") || c.includes("allocator") || c.includes("vault") || c.includes("risk")) return "Deposit $1,000 into a " + name + " vault on " + chain + " and keep the vault shares for the full hold.";
-  if (c.includes("stable")) return "Mint $1,000 of the stable asset through " + name + " on " + chain + " against USDC collateral and hold it.";
-  if (c.includes("insurance")) return "Buy $1,000 of cover from " + name + " on " + chain + " for a position you already hold.";
-  if (c.includes("locker") || c.includes("token lock")) return "Lock $1,000 of tokens in " + name + " on " + chain + " for the full hold and keep the lock receipt.";
-  return "Deposit $1,000 of USDC into " + name + " on " + chain + " and keep the position open for the full hold.";
+  const amt = "$" + capital.toLocaleString("en-US");
+  if (c.includes("lend") || c.includes("cdp") || c.includes("collateral")) return "Supply " + amt + " of USDC into " + name + "'s main market on " + chain + " and leave the supply earning for the full hold.";
+  if (c.includes("dex") || c.includes("amm") || c.includes("swap")) return "Add " + amt + " of liquidity to " + name + "'s busiest pool on " + chain + ", a stable pair when one exists, and keep the LP position.";
+  if (c.includes("yield") || c.includes("leveraged farm") || c.includes("farm") || c.includes("aggregator")) return "Deposit " + amt + " into " + name + "'s highest-TVL vault on " + chain + " and leave the receipt tokens untouched.";
+  if (c.includes("derivative") || c.includes("perpetual") || c.includes("perp") || c.includes("basis")) return "Deposit " + amt + " of USDC as collateral on " + name + " and open one small hedged position; close the hedge, never the deposit.";
+  if (c.includes("bridge")) return "Bridge " + amt + " of USDC through " + name + " to " + chain + ", then use the bridged funds once inside the destination app.";
+  if (c.includes("staking") || c.includes("restak")) return "Stake " + amt + " of the chain's base asset through " + name + " and keep the liquid receipt for the full hold.";
+  if (c.includes("prediction")) return "Fund " + amt + " and take one small position on a " + name + " market that settles inside the hold window.";
+  if (c.includes("rwa") || c.includes("real world")) return "Mint " + amt + " of " + name + "'s yield-bearing asset on " + chain + " and hold it for the full period.";
+  if (c.includes("curator") || c.includes("allocator") || c.includes("vault") || c.includes("risk")) return "Deposit " + amt + " into a " + name + " vault on " + chain + " and keep the vault shares for the full hold.";
+  if (c.includes("stable")) return "Mint " + amt + " of the stable asset through " + name + " on " + chain + " against USDC collateral and hold it.";
+  if (c.includes("insurance")) return "Buy " + amt + " of cover from " + name + " on " + chain + " for a position you already hold.";
+  if (c.includes("locker") || c.includes("token lock")) return "Lock " + amt + " of tokens in " + name + " on " + chain + " for the full hold and keep the lock receipt.";
+  return "Deposit " + amt + " of USDC into " + name + " on " + chain + " and keep the position open for the full hold.";
 }
 
 /** The weekly habit that keeps a farm alive, by category. */
@@ -759,23 +859,31 @@ function weeklyFor(p: SnapshotProtocol): string {
   return "Make one qualifying action each week, such as a deposit, a swap, a vote or a claim.";
 }
 
+/** The tier-specific note: what changes when the capital is small or large. */
+function tierNote(capital: number): string {
+  if (capital <= 100) return "This is a test-size position: the fees are a large share of it, so only farm when the protocol's implied value is high and the net still clears the fees.";
+  if (capital >= 10000) return "Split the deposit across two wallets so no single wallet holds the whole position, and check the pool's depth before adding liquidity.";
+  return "This is the standard position the board's verdicts are judged on.";
+}
+
 /**
- * A protocol's farm plan: seven steps, each an action with a cost and a time.
- * The costs are the gas and bridge of the cheapest of the protocol's first
- * three chains, from the one fee table, so the plan's total is the fees the
- * verdict is judged on: (bridge+gas) + 2*gas + gas + (gas+bridge) = 2*bridge
- * + 5*gas. The plan is derived from the protocol's own record (category,
- * chains, age), never from a hand-written list of names.
+ * A protocol's farm plan at one capital: seven steps, each an action with a
+ * cost and a time. The costs are the gas and bridge of the cheapest of the
+ * protocol's first three chains, from the one fee table, so the plan's total
+ * is the fees the verdict is judged on: (bridge+gas) + 2*gas + gas +
+ * (gas+bridge) = 2*bridge + 5*gas. The plan is derived from the protocol's
+ * own record (category, chains, age), never from a hand-written list.
  */
-export function farmSteps(p: SnapshotProtocol, age: number | null): { steps: FarmStep[]; fees: number; holdDays: number; minutes: number } {
+export function farmSteps(p: SnapshotProtocol, age: number | null, capital: number): { steps: FarmStep[]; fees: number; holdDays: number; minutes: number } {
   const cheapest = cheapestChain(p.chains);
   const { gas, bridge } = cheapest.fee;
   const hold = holdDaysFor(age);
   const weeks = Math.ceil(hold / 7);
   const minutes = 5 + 15 + 15 + 5 * weeks + 5 + 10 + 10;
+  const amt = "$" + capital.toLocaleString("en-US");
   const steps: FarmStep[] = [
     {
-      text: "Open a fresh wallet that holds only the funds you plan to farm, and bridge $1,000 of USDC to " + cheapest.chain + " for the position.",
+      text: "Open a fresh wallet that holds only the funds you plan to farm, and bridge " + amt + " of USDC to " + cheapest.chain + " for the position.",
       cost: dollars(bridge + gas),
       time: "5 minutes",
     },
@@ -785,7 +893,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): { steps: Far
       time: "15 minutes",
     },
     {
-      text: actionFor(p, cheapest.chain),
+      text: actionFor(p, cheapest.chain, capital),
       cost: dollars(2 * gas),
       time: "15 minutes",
     },
@@ -800,7 +908,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): { steps: Far
       time: "5 minutes",
     },
     {
-      text: "Claim the points or airdrop from " + p.name + "'s official claim page and check the receipt lands in the farm wallet.",
+      text: "Claim the points or airdrop from " + p.name + "'s official claim page and check the receipt lands in the farm wallet. " + tierNote(capital),
       cost: dollars(gas),
       time: "10 minutes",
     },
@@ -844,14 +952,22 @@ export function minDeposit(tvl: number, implied: number, fees: number, holdDays:
   return Math.round(hi);
 }
 
+/** A verdict from a slice and its costs: beats everything, beats the fees only, or beats neither. */
+export function verdictOf(slice: number, fees: number, tbill: number): "farm" | "thin" | "skip" {
+  const net = slice - fees - tbill;
+  if (net > 0) return "farm";
+  if (slice > fees) return "thin";
+  return "skip";
+}
+
 /** One row's farm economics at the standard position, plus its sensitivity table. */
 export function farmEcon(p: SnapshotProtocol, age: number | null, implied: number): FarmCost {
-  const { fees, holdDays, minutes } = farmSteps(p, age);
+  const { fees, holdDays, minutes } = farmSteps(p, age, STANDARD_CAPITAL);
   const cheapest = cheapestChain(p.chains);
   const tbill = round2(TBILL_RATE * STANDARD_CAPITAL * (holdDays / 365));
   const slice = round2(sliceFor(STANDARD_CAPITAL, p.tvl, implied));
   const net = round2(slice - fees - tbill);
-  const verdict: "farm" | "thin" | "skip" = net > 0 ? "farm" : slice > fees ? "thin" : "skip";
+  const verdict = verdictOf(slice, fees, tbill);
   const perHour = round2(net / (minutes / 60));
   const minDep = minDeposit(p.tvl, implied, fees, holdDays);
   const sensitivity: number[][] = [];
@@ -880,6 +996,27 @@ export function farmEcon(p: SnapshotProtocol, age: number | null, implied: numbe
     min_deposit_usd: minDep,
     per_hour_usd: perHour,
     sensitivity,
+  };
+}
+
+/** One row's farm economics at one of the three tier capitals, with its own steps. */
+export function farmTier(p: SnapshotProtocol, age: number | null, implied: number, capital: number): FarmTier {
+  const { steps, fees, holdDays, minutes } = farmSteps(p, age, capital);
+  const cheapest = cheapestChain(p.chains);
+  const tbill = round2(TBILL_RATE * capital * (holdDays / 365));
+  const slice = round2(sliceFor(capital, p.tvl, implied));
+  const net = round2(slice - fees - tbill);
+  return {
+    capital_usd: capital,
+    chain: cheapest.chain,
+    fees_usd: fees,
+    hold_days: holdDays,
+    time_minutes: minutes,
+    slice_usd: slice,
+    net_usd: net,
+    verdict: verdictOf(slice, fees, tbill),
+    per_hour_usd: round2(net / (minutes / 60)),
+    steps: steps.map(stepText),
   };
 }
 
@@ -944,11 +1081,12 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
   const { points, dropped } = fitPoints(snapshot);
   const fit = ols(points);
   const fam = familyFactors(points, fit);
+  const beta = breadthBeta(points, fit, fam);
   const bt = backtest(snapshot, points);
 
   // R-squared of the linear fit on the comps.
   const ys = points.map((d) => log10(d.mcap));
-  const yMean = mean(ys);
+  const yMean = average(ys);
   let ssTot = 0;
   let ssRes = 0;
   for (const d of points) {
@@ -986,9 +1124,12 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     const seasoning = seasoningFactor(age);
     const isSibling = tradedFirstWords.has(firstWord(p.name));
     const siblingFactor = isSibling && watchlistSet.has(p.id) ? 0.5 : 1;
-    const implied = Math.max(1, Math.round(curve * familyFactor * growth * seasoning * siblingFactor));
+    const breadth = breadthFactor(beta, p.chains);
+    const multiChain = breadthX(p.chains) === 1;
+    const implied = Math.max(1, Math.round(curve * familyFactor * growth * seasoning * siblingFactor * breadth));
     const farm = farmEcon(p, age, implied);
-    const { steps } = farmSteps(p, age);
+    const { steps } = farmSteps(p, age, STANDARD_CAPITAL);
+    const tiers = TIER_CAPITALS.map((capital) => farmTier(p, age, implied, capital));
     board.push({
       slug: p.id,
       name: p.name,
@@ -1005,15 +1146,22 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
       sibling: isSibling,
       farm_steps: steps.map(stepText),
       farm,
+      farm_tiers: tiers,
       model: {
         curve_usd: curve,
         family_factor: familyFactor,
         growth_factor: growth,
         seasoning_factor: seasoning,
         sibling_factor: siblingFactor,
+        breadth_factor: breadth,
+        breadth_beta: round4(beta),
+        multi_chain: multiChain,
         implied_tvl_multiple: round4(implied / Math.max(1, p.tvl)),
         p10_usd: Math.max(1, Math.round(implied * bt.p10)),
         p90_usd: Math.max(1, Math.round(implied * bt.p90)),
+        loo_within3: bt.loo_within3,
+        oos_miss: bt.oos_miss,
+        oos2024_miss: bt.oos2024_miss,
       },
     });
   }
@@ -1023,7 +1171,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     if (y.implied_value_usd !== x.implied_value_usd) return y.implied_value_usd - x.implied_value_usd;
     return x.slug < y.slug ? -1 : x.slug > y.slug ? 1 : 0;
   });
-  for (let i = 0; i < board.length; i++) board[i].rank = i + 1;
+  for (let i = 0; i < board.length; i++) board[i]!.rank = i + 1;
 
   // Live rows and the set-aside list. The three sets partition the snapshot:
   // ranked (board) + traded (live) + set aside = 758. Every set-aside row
@@ -1099,6 +1247,8 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     a: fit.a,
     b: fit.b,
     r2,
+    breadth_beta: bt.breadth_beta,
+    breadth_multi_count: bt.breadth_multi_count,
     loo_miss: bt.loo_miss,
     loo_within3: bt.loo_within3,
     loo_within10: bt.loo_within10,
@@ -1125,7 +1275,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     p25: bt.p25,
     p75: bt.p75,
     p90: bt.p90,
-    anchors: { flat: bt.loo_flat_miss, v1: 3.6717, v5: 3.6018, v6: 3.3987, v7: 3.3760, top: 2.01 },
+    anchors: { flat: bt.loo_flat_miss, v1: 3.6717, v5: 3.6018, v6: 3.3987, v7: 3.3760, v9: 2.8294, top: 2.01 },
   };
 
   const radar: Radar = {
@@ -1163,21 +1313,28 @@ export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null
     if (!slugs.has(w)) return "watchlist slug missing from board: " + w;
   }
   for (let i = 0; i < board.length; i++) {
-    if (board[i].rank !== i + 1) return "rank not 1..N at index " + i;
-    if (i > 0 && board[i].implied_value_usd > board[i - 1].implied_value_usd) {
-      return "implied value not non-increasing at rank " + board[i].rank;
+    if (board[i]!.rank !== i + 1) return "rank not 1..N at index " + i;
+    if (i > 0 && board[i]!.implied_value_usd > board[i - 1]!.implied_value_usd) {
+      return "implied value not non-increasing at rank " + board[i]!.rank;
     }
-    if (board[i].implied_value_usd <= 0 || board[i].implied_value_usd > 1e14) {
-      return "implied value out of range at rank " + board[i].rank;
+    if (board[i]!.implied_value_usd <= 0 || board[i]!.implied_value_usd > 1e14) {
+      return "implied value out of range at rank " + board[i]!.rank;
     }
-    if (board[i].farm_steps.length < 3 || board[i].farm_steps.length > 12) {
-      return "farm steps count out of range at rank " + board[i].rank;
+    if (board[i]!.farm_steps.length < 3 || board[i]!.farm_steps.length > 12) {
+      return "farm steps count out of range at rank " + board[i]!.rank;
     }
-    for (const s of board[i].farm_steps) {
-      if (s.length < 20 || s.length > 600) return "farm step length out of range at rank " + board[i].rank;
+    for (const s of board[i]!.farm_steps) {
+      if (s.length < 20 || s.length > 600) return "farm step length out of range at rank " + board[i]!.rank;
+    }
+    // Every tier plan must also be 7 steps of 20..600 characters.
+    for (const tier of board[i]!.farm_tiers) {
+      if (tier.steps.length !== 7) return "tier plan step count out of range at rank " + board[i]!.rank;
+      for (const s of tier.steps) {
+        if (s.length < 20 || s.length > 600) return "tier step length out of range at rank " + board[i]!.rank;
+      }
     }
   }
-  if (board.length >= 2 && board[0].implied_value_usd === board[board.length - 1].implied_value_usd) {
+  if (board.length >= 2 && board[0]!.implied_value_usd === board[board.length - 1]!.implied_value_usd) {
     return "all " + board.length + " rows share the same implied value: a board that ranks nothing by value is not a ranking";
   }
   return null;
@@ -1187,18 +1344,19 @@ export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null
 
 // Serialise the radar for the dashboard. The dashboard recomputes each row's
 // implied value live from the model inputs the row carries (curve, family,
-// growth, seasoning, sibling) and must match the board value exactly. data.js
-// is data, not judge-read source, so it is not subject to the 64 KiB text cap.
+// growth, seasoning, sibling, breadth) and must match the board value
+// exactly. data.js is data, not judge-read source, so it is not subject to
+// the 64 KiB text cap.
 export function dataScript(radar: Radar): string {
   return "window.RADAR = " + JSON.stringify(radar) + ";\n";
 }
 
 // ---- self-test -----------------------------------------------------------
 // node lib/model.ts --selftest [--input <snapshot.json|directory>]
-// Fits radar-10 on the snapshot and reports the validation numbers. Exits 0
-// only when both bars are beaten (LOO < x2.83 AND OOS 2025-01-01 < x2.01);
-// exits 1 with the numbers reported when they are not (the failure is the
-// finding, not a bug).
+// Fits radar-11 on the snapshot and reports the validation numbers. Exits 0
+// only when all three v9-baseline bars are beaten (LOO < x2.8294 AND OOS
+// 2025-01-01 < x1.9298 AND OOS 2024-01-01 < x2.0991); exits 1 with the
+// numbers reported when they are not (the failure is the finding, not a bug).
 
 const invokedAsMain =
   typeof process !== "undefined" &&
@@ -1234,7 +1392,7 @@ if (invokedAsMain && process.argv.includes("--selftest")) {
       }
     }
     if (inputFile === null) {
-      process.stderr.write("radar-10 self-test: no snapshot found (pass --input <snapshot.json|directory>)\n");
+      process.stderr.write("radar-11 self-test: no snapshot found (pass --input <snapshot.json|directory>)\n");
       process.exitCode = 2;
       return;
     }
@@ -1242,16 +1400,18 @@ if (invokedAsMain && process.argv.includes("--selftest")) {
     const { points, dropped } = fitPoints(snapshot);
     const fit = ols(points);
     const fam = familyFactors(points, fit);
+    const beta = breadthBeta(points, fit, fam);
     const bt = backtest(snapshot, points);
     const { board } = buildRadar(snapshot);
     const out = (s: string): void => {
       process.stdout.write(s + "\n");
     };
-    out("radar-10 self-test — " + inputFile);
+    out("radar-11 self-test — " + inputFile);
     out("snapshot: " + snapshot.protocols.length + " protocols, as_of " + snapshot.as_of + ", watchlist " + snapshot.watchlist.length);
     out("comps: " + points.length + " (dropped " + dropped.length + ")");
     for (const d of dropped) out("  dropped: " + d.slug + " — " + d.reason);
     out("curve: log10(mcap) = " + fit.a.toFixed(4) + " + " + fit.b.toFixed(4) + " * log10(TVL/$100M), n=" + fit.n);
+    out("breadth: beta " + beta.toFixed(4) + " (multi-chain comps " + bt.breadth_multi_count + " of " + points.length + ")");
     out("LOO: x" + bt.loo_miss.toFixed(4) + " (within 3x " + (bt.loo_within3 * 100).toFixed(1) + "%, within 10x " + (bt.loo_within10 * 100).toFixed(1) + "%) | flat x" + bt.loo_flat_miss.toFixed(4) + " | curve-only x" + bt.curve_only_loo.toFixed(4));
     out("OOS 2025-01-01: x" + bt.oos_miss.toFixed(4) + " (train " + bt.oos_train + ", test " + bt.oos_test + ", within 3x " + (bt.oos_within3 * 100).toFixed(1) + "%) | flat x" + bt.oos_flat_miss.toFixed(4));
     out("OOS 2024-01-01: x" + bt.oos2024_miss.toFixed(4) + " (train " + bt.oos2024_train + ", test " + bt.oos2024_test + ", within 3x " + (bt.oos2024_within3 * 100).toFixed(1) + "%) | flat x" + bt.oos2024_flat_miss.toFixed(4));
@@ -1259,10 +1419,11 @@ if (invokedAsMain && process.argv.includes("--selftest")) {
     out("band: P10 x" + bt.p10.toFixed(3) + ", P25 x" + bt.p25.toFixed(3) + ", P75 x" + bt.p75.toFixed(3) + ", P90 x" + bt.p90.toFixed(3) + " | coverage 50% band " + (bt.band50 * 100).toFixed(1) + "%, 80% band " + (bt.band80 * 100).toFixed(1) + "%");
     out("family factors: " + fam.size + " categories");
     out("board: " + board.length + " rows");
-    const looOk = bt.loo_miss < LOO_BAR;
-    const oosOk = bt.oos_miss < OOS_BAR;
-    out("bars: LOO x" + bt.loo_miss.toFixed(4) + " < x" + LOO_BAR + " ? " + (looOk ? "YES" : "NO") + " | OOS x" + bt.oos_miss.toFixed(4) + " < x" + OOS_BAR + " ? " + (oosOk ? "YES" : "NO"));
-    out(looOk && oosOk ? "SELF-TEST PASS" : "SELF-TEST FAIL (bars not beaten — the failure is the finding)");
-    process.exitCode = looOk && oosOk ? 0 : 1;
+    const looOk = bt.loo_miss < LOO_BAR_V9;
+    const oosOk = bt.oos_miss < OOS_BAR_V9;
+    const oos24Ok = bt.oos2024_miss < OOS2024_BAR_V9;
+    out("bars: LOO x" + bt.loo_miss.toFixed(4) + " < x" + LOO_BAR_V9 + " ? " + (looOk ? "YES" : "NO") + " | OOS25 x" + bt.oos_miss.toFixed(4) + " < x" + OOS_BAR_V9 + " ? " + (oosOk ? "YES" : "NO") + " | OOS24 x" + bt.oos2024_miss.toFixed(4) + " < x" + OOS2024_BAR_V9 + " ? " + (oos24Ok ? "YES" : "NO"));
+    out(looOk && oosOk && oos24Ok ? "SELF-TEST PASS" : "SELF-TEST FAIL (bars not beaten — the failure is the finding)");
+    process.exitCode = looOk && oosOk && oos24Ok ? 0 : 1;
   })();
 }
