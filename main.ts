@@ -1,8 +1,10 @@
 // A working token-radar-01 entry (Node 22, standard library only).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores
-// every pre-token protocol with the radar-7 plain power-law model in lib/model.ts, writes the ranked
-// board to /output/board.json, and copies this repository's dashboard/ and screenshots/ to
+// every pre-token protocol with the radar-8 model in lib/model.ts — a quadratic size curve fitted
+// to the snapshot's own traded tokens, adjusted by each protocol's seven-day growth and by how
+// long it has run with no token, with every farm plan costed and netted to the dollar — writes the
+// ranked board to /output/board.json, and copies this repository's dashboard/ and screenshots/ to
 // /output. Last, it writes /output/dossier.json, the summary the judge reads, with the vendored
 // make.fun library.
 //
@@ -10,8 +12,10 @@
 // and dashboard/app.js read /output/data.js, which this program writes from the same board. The
 // board is 198 rows: all 40 watchlist protocols plus the 158 pre-token protocols that pass the
 // watchlist's own exclusion test (138 below the $50M floor, 20 above it and flagged possible_parent),
-// each with a 7-step farm plan. The live-token protocols
-// are set aside with their market caps, never mixed into the ranking.
+// each with a 7-step farm plan and a costed net (gas + time + opportunity cost of the capital,
+// weighed against the expected airdrop). The live-token protocols
+// are set aside with their market caps, never mixed into the ranking. No kin discount is applied
+// anywhere: a possible_parent row is flagged, not halved.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json

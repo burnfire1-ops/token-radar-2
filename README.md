@@ -10,25 +10,38 @@ which ones still record no token and are not a wrapped or staked product of one 
 ranks them by what their launch would be worth — then hands in a web dashboard with the board, a
 detail view for each protocol, and the steps to farm it.
 
-## The model (radar-7)
+## The model (radar-8)
 
-Implied value is a plain power law fitted at runtime from the snapshot's own token-bearing
-protocols, with no factors at all: the market pays a shrinking multiple of TVL as protocols get
-bigger, and that is the whole model.
+Implied value is a size curve fitted at runtime to the snapshot's own traded tokens, adjusted by
+each protocol's seven-day growth and by how long it has run with no token. No kin discount
+anywhere: a possible_parent row is flagged, not halved.
 
 ```
-implied = round( 10^(A + B x log10(tvl)) x discount )
-discount = 0.5 when the row is flagged possible_parent, else 1
+base     = 10^(a + b x log10(tvl) + c x (log10(tvl))^2)   (quadratic log-log OLS, fitted to the comps)
+growth   = 1 + clamp(change_7d_pct, -50, +100) / 100 x 0.5
+maturity = 0.7 + 0.3 x min(age_days, 1095) / 1095
+implied  = max(1, round(base x growth x maturity))
 ```
 
-`log10(mcap) = A + B x log10(tvl)` is an OLS fit over the 128 token-bearing protocols with a
-market cap above zero (on this snapshot A = 3.025, B = 0.522, R2 = 0.194). The board is 198 rows:
-all 40 watchlist protocols plus the 158 pre-token protocols that pass the watchlist's own
-exclusion test. The 20 above-floor pre-token protocols not on the watchlist are flagged
-possible_parent and discounted x0.5: the snapshot carries no parent data, so their independence
-cannot be verified here, and their standalone implied value is halved rather than trusted at
-face value. Implied value is a valuation, not a forecast: it does not predict whether or when a
-token launches, and "no token on record" is never written as "no token".
+The quadratic is fitted over the 128 protocols in the snapshot that already trade (market cap
+above zero and TVL above zero). On this snapshot the fit is a = 4.3668, b = 0.1893, c = 0.0204,
+R2 = 0.19. Leave-one-out miss x3.38; time-split out-of-sample miss x2.61 (fit on tokens listed
+before 2025-01-01, tested on tokens listed after). Anchors on the same measure: a flat median
+multiple misses by x5.07, the v1 model by x3.67, the v5 model by x3.60, the v6 plain power law by
+x3.40, and the best known public result by x2.01.
+
+The board is 198 rows: all 40 watchlist protocols plus the 158 pre-token protocols that pass the
+watchlist's own exclusion test. The 20 above-floor pre-token protocols not on the watchlist are
+flagged possible_parent and shown as such; their value is not discounted, because the snapshot
+carries no parent data either way and a halving would be an invented number.
+
+Every row carries a 7-step farm plan and a costed net: gas (main action, second action, weekly
+actions, exit) plus time at $15/hour plus the opportunity cost of the farm capital at 5% APR,
+weighed against the expected airdrop (implied value x launch probability by age x a 0.002%
+farmer share). Rows are marked farm (net over $50), thin ($0 to $50), or skip (below $0), and
+"Farm next" ranks by net value per dollar of farm capital. Implied value is a valuation, not a
+forecast: it does not predict whether or when a token launches, and "no token on record" is never
+written as "no token".
 
 ## How to run
 
