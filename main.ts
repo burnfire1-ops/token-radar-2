@@ -1,15 +1,16 @@
 // A working token-radar-01 entry (Node 22, standard library only).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores
-// every pre-token protocol with the radar-2 power-law model in lib/model.ts, writes the ranked
+// every pre-token protocol with the radar-7 plain power-law model in lib/model.ts, writes the ranked
 // board to /output/board.json, and copies this repository's dashboard/ and screenshots/ to
 // /output. Last, it writes /output/dossier.json, the summary the judge reads, with the vendored
 // make.fun library.
 //
 // The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
 // and dashboard/app.js read /output/data.js, which this program writes from the same board. The
-// board is 178 rows: all 40 watchlist protocols plus the 138 below-floor pre-token protocols that
-// pass the watchlist's own exclusion test, each with a 7-step farm plan. The live-token protocols
+// board is 198 rows: all 40 watchlist protocols plus the 158 pre-token protocols that pass the
+// watchlist's own exclusion test (138 below the $50M floor, 20 above it and flagged possible_parent),
+// each with a 7-step farm plan. The live-token protocols
 // are set aside with their market caps, never mixed into the ranking.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:

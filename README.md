@@ -6,29 +6,25 @@ which ones still record no token and are not a wrapped or staked product of one 
 ranks them by what their launch would be worth — then hands in a web dashboard with the board, a
 detail view for each protocol, and the steps to farm it.
 
-## The model (radar-2)
+## The model (radar-7)
 
-Implied value is a power law fitted at runtime from the snapshot's own token-bearing protocols,
-not a flat multiple: the market pays a shrinking multiple of TVL as protocols get bigger, and a
-different multiple by category.
+Implied value is a plain power law fitted at runtime from the snapshot's own token-bearing
+protocols, with no factors at all: the market pays a shrinking multiple of TVL as protocols get
+bigger, and that is the whole model.
 
 ```
-implied = round( 10^(A + B x log10(tvl)) x catFactor
-  x (1 + clamp(change_7d, -50, 100) / 100 x 0.5)
-  x (0.7 + 0.3 x min(age_days, 1095) / 1095)
-  x (1 + 0.02 x min(chains - 1, 5)) )
+implied = round( 10^(A + B x log10(tvl)) x discount )
+discount = 0.5 when the row is flagged possible_parent, else 1
 ```
 
 `log10(mcap) = A + B x log10(tvl)` is an OLS fit over the 128 token-bearing protocols with a
-market cap above zero (on this snapshot A = 3.025, B = 0.522, R2 = 0.194). `catFactor` is the
-category's median log-residual against that fit, used only when at least 3 protocols in the
-category carry a market cap, and clamped to [0.5, 2.0]; every other category scores 1.0. The board
-is 178 rows: all 40 watchlist protocols plus the 138 below-floor pre-token protocols that pass the
-watchlist's own exclusion test. The 92 above-floor pre-token protocols not on the watchlist are not
-ranked: the ones the snapshot's own rules exclude are wrapped/staked products of tokens that
-already trade, and the rest cannot be verified as independent protocols. Implied value is a
-valuation, not a forecast: it does not predict whether or when a token launches, and "no token on
-record" is never written as "no token".
+market cap above zero (on this snapshot A = 3.025, B = 0.522, R2 = 0.194). The board is 198 rows:
+all 40 watchlist protocols plus the 158 pre-token protocols that pass the watchlist's own
+exclusion test. The 20 above-floor pre-token protocols not on the watchlist are flagged
+possible_parent and discounted x0.5: the snapshot carries no parent data, so their independence
+cannot be verified here, and their standalone implied value is halved rather than trusted at
+face value. Implied value is a valuation, not a forecast: it does not predict whether or when a
+token launches, and "no token on record" is never written as "no token".
 
 ## How to run
 
