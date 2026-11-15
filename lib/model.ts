@@ -88,11 +88,13 @@ export type Backtest = {
   oos_miss: number;
   oos_within3: number;
   oos_flat_miss: number;
+  oos_flat_within3: number;
   oos_train: number;
   oos_test: number;
   oos2024_miss: number;
   oos2024_within3: number;
   oos2024_flat_miss: number;
+  oos2024_flat_within3: number;
   oos2024_train: number;
   oos2024_test: number;
   curve_only_loo: number;
@@ -194,16 +196,19 @@ export type ModelFit = {
   loo_within3: number;
   loo_within10: number;
   loo_flat_miss: number;
+  loo_flat_within3: number;
   oos_miss: number;
   oos_train: number;
   oos_test: number;
   oos_within3: number;
   oos_flat_miss: number;
+  oos_flat_within3: number;
   oos2024_miss: number;
   oos2024_train: number;
   oos2024_test: number;
   oos2024_within3: number;
   oos2024_flat_miss: number;
+  oos2024_flat_within3: number;
   curve_only_loo: number;
   factor_growth_r: number;
   factor_age_r: number;
@@ -232,6 +237,7 @@ export type Radar = {
   live: LiveRow[];
   set_aside_rows: SetAsideRow[];
   family: FamilyStat[];
+  fees: Record<string, ChainFee>;
   curve_points: { slug: string; name: string; tvl: number; mcap: number; category: string }[];
   loo_points: { slug: string; tvl: number; real: number; pred: number; category: string }[];
   universe: { total: number; ranked: number; traded: number; set_aside: number };
@@ -602,11 +608,11 @@ export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
   const curveOnly = missSummary(looCurveOnlyMisses);
 
   // Time split helper: fit on tokens listed before `cutoff`, test after.
-  function timeSplit(cutoff: string): { median: number; within3: number; flatMedian: number; train: number; test: number } {
+  function timeSplit(cutoff: string): { median: number; within3: number; flatMedian: number; flatWithin3: number; train: number; test: number } {
     const pre = points.filter((d) => d.listed_at !== null && d.listed_at < cutoff);
     const post = points.filter((d) => d.listed_at !== null && d.listed_at >= cutoff);
     if (pre.length < 10 || post.length < 5) {
-      return { median: NaN, within3: 0, flatMedian: NaN, train: pre.length, test: post.length };
+      return { median: NaN, within3: 0, flatMedian: NaN, flatWithin3: 0, train: pre.length, test: post.length };
     }
     const fit = ols(pre);
     const fam = familyFactors(pre, fit);
@@ -614,7 +620,7 @@ export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
     const ratios = pre.map((d) => d.mcap / d.tvl).sort((x, y) => x - y);
     const flat = ratios[Math.floor(ratios.length / 2)]!;
     const flatS = missSummary(post.map((d) => miss(d.tvl * flat, d.mcap)));
-    return { median: s.median, within3: s.within3, flatMedian: flatS.median, train: pre.length, test: post.length };
+    return { median: s.median, within3: s.within3, flatMedian: flatS.median, flatWithin3: flatS.within3, train: pre.length, test: post.length };
   }
   const split2025 = timeSplit(OOS_CUTOFF);
   const split2024 = timeSplit(OOS_CUTOFF_2024);
@@ -665,11 +671,13 @@ export function backtest(snapshot: Snapshot, points: FitPoint[]): Backtest {
     oos_miss: split2025.median,
     oos_within3: round3(split2025.within3),
     oos_flat_miss: split2025.flatMedian,
+    oos_flat_within3: round3(split2025.flatWithin3),
     oos_train: split2025.train,
     oos_test: split2025.test,
     oos2024_miss: split2024.median,
     oos2024_within3: round3(split2024.within3),
     oos2024_flat_miss: split2024.flatMedian,
+    oos2024_flat_within3: round3(split2024.flatWithin3),
     oos2024_train: split2024.train,
     oos2024_test: split2024.test,
     curve_only_loo: curveOnly.median,
@@ -1095,16 +1103,19 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     loo_within3: bt.loo_within3,
     loo_within10: bt.loo_within10,
     loo_flat_miss: bt.loo_flat_miss,
+    loo_flat_within3: bt.loo_flat_within3,
     oos_miss: bt.oos_miss,
     oos_train: bt.oos_train,
     oos_test: bt.oos_test,
     oos_within3: bt.oos_within3,
     oos_flat_miss: bt.oos_flat_miss,
+    oos_flat_within3: bt.oos_flat_within3,
     oos2024_miss: bt.oos2024_miss,
     oos2024_train: bt.oos2024_train,
     oos2024_test: bt.oos2024_test,
     oos2024_within3: bt.oos2024_within3,
     oos2024_flat_miss: bt.oos2024_flat_miss,
+    oos2024_flat_within3: bt.oos2024_flat_within3,
     curve_only_loo: bt.curve_only_loo,
     factor_growth_r: bt.factor_growth_r,
     factor_age_r: bt.factor_age_r,
@@ -1133,6 +1144,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     live,
     set_aside_rows: setAsideRows,
     family: familyStats(points, fam),
+    fees: CHAIN_FEES,
     curve_points: points.map((d) => ({ slug: d.slug, name: d.name, tvl: d.tvl, mcap: d.mcap, category: d.category })),
     loo_points: bt.loo_points,
     universe,
