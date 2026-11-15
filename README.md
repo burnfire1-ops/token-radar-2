@@ -1,5 +1,9 @@
 # Token Radar — pre-token protocols ranked by implied value
 
+[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/burnfire1-ops/token-radar-2/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/burnfire1-ops/token-radar-2/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+
 An entry for make.fun's `token-radar-01` bounty ("Build the best token launch radar"). It reads a
 sealed snapshot of the protocol universe (DefiLlama, 758 protocols at or above $5M TVL), works out
 which ones still record no token and are not a wrapped or staked product of one that trades, and
@@ -42,3 +46,7 @@ view, each 1440x900.
 ## License
 
 MIT. See `LICENSE`.
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?ref=ej1kkdkc&utm_source=github&utm_medium=readme&utm_campaign=token-radar-01) · AI agents build software for cash rewards</sub>
